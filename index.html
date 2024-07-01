@@ -4,336 +4,277 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chicken Chase Game</title>
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.55.2/phaser.min.js"></script>
     <style>
-        body { margin: 0; padding: 0; height: 100vh; display: flex; justify-content: center; align-items: center; background-color: #000; }
-        #game-container { width: 100%; height: 100%; }
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: 'Poppins', sans-serif; }
+        #gameContainer { width: 100%; height: 100%; }
+        #ui { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .controls { display: flex; gap: 10px; }
+        .control-button { width: 40px; height: 40px; background-size: contain; background-repeat: no-repeat; cursor: pointer; }
+        #pauseButton { background-image: url('assets/pause_button.png'); }
+        #musicButton { background-image: url('assets/music_button.png'); }
+        #soundButton { background-image: url('assets/sound_button.png'); }
+        #distanceMeter { background-image: url('assets/fancy_distance_meter_bg.png'); padding: 15px 25px; font-size: 24px; color: #FFD700; text-shadow: 2px 2px 4px #000; border-radius: 20px; box-shadow: 0 0 15px rgba(255, 215, 0, 0.7); }
+        #healthBar { display: flex; gap: 5px; }
+        .heart { width: 40px; height: 40px; background-size: contain; background-repeat: no-repeat; }
+        #powerUpIndicators { display: flex; flex-direction: column; gap: 5px; }
+        .power-up { width: 40px; height: 40px; background-size: contain; background-repeat: no-repeat; position: relative; }
+        .power-up-timer { position: absolute; bottom: 0; left: 0; width: 100%; height: 5px; background-color: rgba(255, 255, 255, 0.5); }
+        .power-up-counter { position: absolute; bottom: 0; right: 0; background-color: rgba(0, 0, 0, 0.5); color: white; padding: 2px 5px; font-size: 12px; border-radius: 3px; }
+        #gameOverMenu { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: rgba(0, 0, 0, 0.8); color: white; padding: 20px; border-radius: 10px; text-align: center; display: none; }
+        #gameOverMenu button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 5px; }
+        @media (max-width: 768px) { .control-button, .heart, .power-up { width: 30px; height: 30px; } #distanceMeter { font-size: 20px; padding: 10px 20px; } }
     </style>
 </head>
 <body>
-    <div id="game-container"></div>
+    <div id="gameContainer"></div>
+    <div id="ui">
+        <div class="controls">
+            <div id="pauseButton" class="control-button"></div>
+            <div id="musicButton" class="control-button"></div>
+            <div id="soundButton" class="control-button"></div>
+        </div>
+        <div id="distanceMeter">Distance: 0m</div>
+        <div id="healthBar"></div>
+    </div>
+    <div id="powerUpIndicators"></div>
+    <div id="gameOverMenu">
+        <h2>Game Over!</h2>
+        <p id="finalScore"></p>
+        <button id="playAgainButton">Play Again</button>
+        <button id="watchAdButton">Watch Ad to Continue</button>
+    </div>
     <script>
-        const RARITY = { COMMON: 0.001, UNCOMMON: 0.0000005, RARE: 0.00000000004 };
-
-        class ChickenChaseGame extends Phaser.Scene {
-            constructor() {
-                super('ChickenChaseGame');
-                this.gameState = {
-                    distance: 0,
-                    paused: false,
-                    musicOn: true,
-                    soundOn: true,
-                    volume: 1,
-                    chicken: { poweredUp: false, powerUpCount: 0 },
-                    hearts: 5,
-                    shieldActive: false,
-                    powerUps: [],
-                    timeSinceLastDamage: 0,
-                    gameOver: false,
-                    chickenBaseSpeed: 300,
-                    enemyBaseSpeed: 250,
-                    maxPowerUps: 3,
-                };
+const config = {
+    type: Phaser.AUTO,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    parent: 'gameContainer',
+    physics: { default: 'arcade', arcade: { gravity: { y: 300 }, debug: false } },
+    scene: { preload: preload, create: create, update: update }
+};
+const game = new Phaser.Game(config);
+let gameState = {
+    distance: 0, paused: false, musicOn: true, soundOn: true,
+    chicken: { poweredUp: false, powerUpCount: 0 },
+    hearts: 5, powerUps: [], shieldActive: false, timeSinceLastDamage: 0,
+    gameOver: false
+};
+let images = {}, sounds = {}, sprites = {}, groups = {};
+function preload() {
+    const imageNames = ['background', 'chicken', 'chicken_powered', 'enemy', 'magic-potion', 'health-potion', 'shield', 'ground', 'heart01', 'heart02', 'heart03', 'heart04', 'heart05', 'projectile', 'bird_flying'];
+    imageNames.forEach(name => this.load.image(name, `assets/${name}.png`));
+    ['background_music', 'jump_sound', 'hit_sound', 'powerup_sound', 'projectile_sound'].forEach(name => this.load.audio(name, `assets/${name}.mp3`));
+}
+function create() {
+    createBackground.call(this);
+    createSprites.call(this);
+    createSounds.call(this);
+    createUI.call(this);
+    this.physics.add.collider(sprites.chicken, sprites.ground);
+    this.physics.add.overlap(sprites.chicken, groups.powerUps, collectPowerUp, null, this);
+    this.physics.add.overlap(sprites.chicken, groups.projectiles, hitChicken, null, this);
+    this.input.on('pointerdown', jump);
+    this.input.keyboard.on('keydown-SPACE', jump);
+}
+function update() {
+    if (gameState.paused || gameState.gameOver) return;
+    updateDistance.call(this);
+    updateChickenPosition.call(this);
+    updateEnemyPosition.call(this);
+    updateProjectiles.call(this);
+    updatePowerUps.call(this);
+    updateBirds.call(this);
+}
+function createBackground() {
+    sprites.background = this.add.tileSprite(0, 0, config.width, config.height, 'background').setOrigin(0);
+    sprites.ground = this.physics.add.staticSprite(config.width / 2, config.height - 50, 'ground').setScale(2);
+}
+function createSprites() {
+    sprites.chicken = this.physics.add.sprite(100, config.height - 200, 'chicken').setScale(0.5);
+    sprites.enemy = this.add.sprite(config.width - 100, config.height - 200, 'enemy').setScale(0.5);
+    groups.powerUps = this.physics.add.group();
+    groups.projectiles = this.physics.add.group();
+    sprites.birds = Array(3).fill().map(() => this.add.sprite(Phaser.Math.Between(0, config.width), Phaser.Math.Between(50, 200), 'bird_flying').setScale(0.3));
+}
+function createSounds() {
+    ['background_music', 'jump_sound', 'hit_sound', 'powerup_sound', 'projectile_sound'].forEach(name => {
+        sounds[name] = this.sound.add(name);
+        if (name === 'background_music') sounds[name].setLoop(true);
+    });
+    if (gameState.musicOn) sounds.background_music.play();
+}
+function createUI() {
+    updateHealthBar();
+    updatePowerUpIndicators();
+}
+function updateDistance() {
+    gameState.distance += 0.1;
+    document.getElementById('distanceMeter').textContent = `Distance: ${Math.floor(gameState.distance)}m`;
+}
+function updateChickenPosition() {
+    sprites.chicken.x = 100;
+    if (sprites.chicken.y > config.height) hitChicken();
+}
+function updateEnemyPosition() {
+    sprites.enemy.x = Phaser.Math.Clamp(sprites.enemy.x, config.width * 0.6, config.width * 0.8);
+    sprites.enemy.y = sprites.ground.y - sprites.enemy.height / 2;
+}
+function updateProjectiles() {
+    groups.projectiles.children.entries.forEach(projectile => {
+        projectile.x -= 5;
+        if (projectile.x < 0) projectile.destroy();
+    });
+    if (Phaser.Math.Between(1, 100) === 1) {
+        const projectile = groups.projectiles.create(sprites.enemy.x, sprites.enemy.y, 'projectile').setScale(0.5);
+        projectile.setVelocityX(-200);
+        if (gameState.soundOn) sounds.projectile_sound.play();
+    }
+}
+function updatePowerUps() {
+    groups.powerUps.children.entries.forEach(powerUp => {
+        powerUp.x -= 5;
+        if (powerUp.x < 0) powerUp.destroy();
+    });
+    if (Phaser.Math.Between(1, 200) === 1) {
+        const type = Phaser.Math.RND.pick(['magic-potion', 'health-potion', 'shield']);
+        const powerUp = groups.powerUps.create(config.width, Phaser.Math.Between(100, config.height - 200), type).setScale(0.5);
+        powerUp.setVelocityX(-100);
+    }
+}
+function updateBirds() {
+    sprites.birds.forEach(bird => {
+        bird.x -= 2;
+        bird.y += Math.sin(this.time.now / 500) * 2;
+        if (bird.x < -bird.width) bird.x = config.width + bird.width;
+    });
+}
+function jump() {
+    if (sprites.chicken.body.touching.down) {
+        sprites.chicken.setVelocityY(-400);
+        if (gameState.soundOn) sounds.jump_sound.play();
+    }
+}
+function collectPowerUp(chicken, powerUp) {
+    powerUp.destroy();
+    if (gameState.soundOn) sounds.powerup_sound.play();
+    switch (powerUp.texture.key) {
+        case 'magic-potion':
+            gameState.chicken.poweredUp = true;
+            gameState.chicken.powerUpCount++;
+            sprites.chicken.setTexture('chicken_powered').setScale(0.6);
+            break;
+        case 'health-potion':
+            if (gameState.hearts < 5) {
+                gameState.hearts++;
+                updateHealthBar();
             }
-
-            preload() {
-                this.load.image('background', 'assets/background.png');
-                this.load.image('ground', 'assets/ground.png');
-                this.load.image('chicken', 'assets/chicken.png');
-                this.load.image('chicken_powered', 'assets/chicken_powered.png');
-                this.load.image('enemy', 'assets/enemy.png');
-                this.load.image('magic-potion', 'assets/magic-potion.png');
-                this.load.image('health-potion', 'assets/health-potion.png');
-                this.load.image('shield', 'assets/shield.png');
-                this.load.image('projectile', 'assets/projectile.png');
-                this.load.image('bird_flying', 'assets/bird_flying.png');
-                this.load.image('heart', 'assets/heart01.png');
-                this.load.image('spike', 'assets/spike.png');
-                this.load.audio('background_music', 'assets/background_music.mp3');
-                this.load.audio('jump_sound', 'assets/jump_sound.mp3');
-                this.load.audio('hit_sound', 'assets/hit_sound.mp3');
-                this.load.audio('powerup_sound', 'assets/powerup_sound.mp3');
-                this.load.audio('projectile_sound', 'assets/projectile_sound.mp3');
-            }
-
-            create() {
-                this.createBackground();
-                this.createGround();
-                this.createChicken();
-                this.createEnemy();
-                this.createPowerUps();
-                this.createUI();
-                this.createSounds();
-                this.createControls();
-
-                this.physics.add.collider(this.chicken, this.groundGroup);
-                this.physics.add.overlap(this.chicken, this.powerUpGroup, this.collectPowerUp, null, this);
-                this.physics.add.overlap(this.chicken, this.enemy, this.damageChicken, null, this);
-
-                this.time.addEvent({ delay: 100, callback: this.updateDistance, callbackScope: this, loop: true });
-                this.time.addEvent({ delay: 2000, callback: this.shootProjectile, callbackScope: this, loop: true });
-            }
-
-            update() {
-                if (this.gameState.paused || this.gameState.gameOver) return;
-
-                this.updateBackgroundAndGround();
-                this.updateChickenPosition();
-                this.updateEnemyPosition();
-                this.updatePowerUps();
-                this.updateProjectiles();
-                this.updateGameSpeed();
-
-                this.gameState.timeSinceLastDamage += this.game.loop.delta;
-            }
-
-            createBackground() {
-                this.bg = this.add.tileSprite(0, 0, this.cameras.main.width, this.cameras.main.height, 'background').setOrigin(0);
-            }
-
-            createGround() {
-                this.groundGroup = this.physics.add.staticGroup();
-                this.ground = this.groundGroup.create(0, this.cameras.main.height, 'ground').setOrigin(0, 1).setScale(2);
-                this.ground.refreshBody();
-            }
-
-            createChicken() {
-                this.chicken = this.physics.add.sprite(this.cameras.main.width * 0.2, this.cameras.main.height - 200, 'chicken');
-                this.chicken.setCollideWorldBounds(true);
-                this.chicken.body.setGravityY(1000);
-            }
-
-            createEnemy() {
-                this.enemy = this.physics.add.sprite(this.cameras.main.width * 0.1, this.cameras.main.height - 200, 'enemy');
-                this.enemy.setCollideWorldBounds(true);
-            }
-
-            createPowerUps() {
-                this.powerUpGroup = this.physics.add.group();
-                ['magic-potion', 'health-potion', 'shield', 'spike'].forEach(type => {
-                    this.powerUpGroup.create(this.cameras.main.width + Phaser.Math.Between(100, 1000), Phaser.Math.Between(100, this.cameras.main.height - 200), type);
-                });
-            }
-
-            createUI() {
-                this.distanceText = this.add.text(this.cameras.main.width / 2, 20, 'Distance: 0m', { fontSize: '24px', fill: '#fff' }).setOrigin(0.5, 0);
-                this.healthBar = this.add.group();
-                this.updateHealthBar();
-                this.powerUpIndicators = this.add.group();
-            }
-
-            createSounds() {
-                this.backgroundMusic = this.sound.add('background_music', { loop: true, volume: this.gameState.volume });
-                this.jumpSound = this.sound.add('jump_sound', { volume: this.gameState.volume });
-                this.hitSound = this.sound.add('hit_sound', { volume: this.gameState.volume });
-                this.powerUpSound = this.sound.add('powerup_sound', { volume: this.gameState.volume });
-                this.projectileSound = this.sound.add('projectile_sound', { volume: this.gameState.volume });
-                if (this.gameState.musicOn) this.backgroundMusic.play();
-            }
-
-            createControls() {
-                this.input.keyboard.on('keydown-SPACE', this.jump, this);
-                this.input.on('pointerdown', this.jump, this);
-                this.input.keyboard.on('keydown-ESC', this.togglePause, this);
-            }
-
-            updateDistance() {
-                this.gameState.distance += 0.5;
-                this.distanceText.setText(`Distance: ${Math.floor(this.gameState.distance)}m`);
-            }
-
-            updateBackgroundAndGround() {
-                this.bg.tilePositionX += 0.5;
-                this.ground.x -= 2;
-                if (this.ground.x <= -this.ground.width / 2) {
-                    this.ground.x = 0;
-                }
-            }
-
-            updateChickenPosition() {
-                if (this.chicken.body.touching.down) {
-                    this.chicken.setVelocityX(0);
-                }
-            }
-
-            updateEnemyPosition() {
-                const targetX = this.cameras.main.width * 0.1;
-                const distance = targetX - this.enemy.x;
-                this.enemy.setVelocityX(distance * 0.1);
-            }
-
-            updatePowerUps() {
-                this.powerUpGroup.children.entries.forEach(powerUp => {
-                    powerUp.x -= 2;
-                    if (powerUp.x < -powerUp.width) {
-                        this.respawnPowerUp(powerUp);
-                    }
-                });
-            }
-
-            updateProjectiles() {
-                this.projectiles.children.entries.forEach(projectile => {
-                    projectile.x += 5;
-                    if (projectile.x > this.cameras.main.width) {
-                        projectile.destroy();
-                    }
-                });
-            }
-
-            updateGameSpeed() {
-                const baseSpeed = 2.5;
-                const maxSpeedIncrease = 25;
-                const speedIncreaseRate = 0.0001;
-                const speedIncrease = Math.min(this.gameState.distance * speedIncreaseRate, maxSpeedIncrease);
-                const currentSpeed = baseSpeed + speedIncrease;
-                this.ground.body.velocity.x = -currentSpeed * 100;
-                this.enemy.body.velocity.x = -(currentSpeed - 1) * 100;
-                this.powerUpGroup.setVelocityX(-currentSpeed * 100);
-            }
-
-            jump() {
-                if (this.chicken.body.touching.down) {
-                    this.chicken.setVelocityY(-600);
-                    if (this.gameState.soundOn) this.jumpSound.play();
-                }
-            }
-
-            togglePause() {
-                this.gameState.paused = !this.gameState.paused;
-                if (this.gameState.paused) {
-                    this.backgroundMusic.pause();
-                    this.scene.pause();
-                    // Show pause menu
-                } else {
-                    if (this.gameState.musicOn) this.backgroundMusic.resume();
-                    this.scene.resume();
-                    // Hide pause menu
-                }
-            }
-
-            collectPowerUp(chicken, powerUp) {
-                switch (powerUp.texture.key) {
-                    case 'magic-potion':
-                        this.powerUpChicken();
-                        break;
-                    case 'health-potion':
-                        this.healChicken();
-                        break;
-                    case 'shield':
-                        this.activateShield();
-                        break;
-                    case 'spike':
-                        this.damageChicken();
-                        break;
-                }
-                this.respawnPowerUp(powerUp);
-            }
-
-            powerUpChicken() {
-                if (this.gameState.chicken.powerUpCount < this.gameState.maxPowerUps) {
-                    this.gameState.chicken.powerUpCount++;
-                    this.gameState.chicken.poweredUp = true;
-                    this.chicken.setTexture('chicken_powered');
-                    this.chicken.setScale(1.2);
-                    if (this.gameState.soundOn) this.powerUpSound.play();
-                    this.gameState.powerUps.push({ type: 'magic-potion', duration: 10000, startTime: this.time.now });
-                    this.updatePowerUpIndicators();
-                }
-            }
-
-            healChicken() {
-                if (this.gameState.hearts < 5) {
-                    this.gameState.hearts++;
-                    this.updateHealthBar();
-                    if (this.gameState.soundOn) this.powerUpSound.play();
-                }
-            }
-
-            activateShield() {
-                this.gameState.shieldActive = true;
-                if (this.gameState.soundOn) this.powerUpSound.play();
-                this.gameState.powerUps.push({ type: 'shield', duration: 5000, startTime: this.time.now });
-                this.updatePowerUpIndicators();
-            }
-
-            damageChicken() {
-                if (this.gameState.shieldActive) {
-                    this.gameState.shieldActive = false;
-                    this.gameState.powerUps = this.gameState.powerUps.filter(powerUp => powerUp.type !== 'shield');
-                    this.updatePowerUpIndicators();
-                    return;
-                }
-
-                this.gameState.hearts--;
-                this.gameState.timeSinceLastDamage = 0;
-                this.updateHealthBar();
-                if (this.gameState.hearts <= 0) {
-                    this.gameOver();
-                } else {
-                    if (this.gameState.chicken.powerUpCount > 0) {
-                        this.gameState.chicken.powerUpCount--;
-                        this.chicken.setScale(1);
-                    }
-                    if (this.gameState.soundOn) this.hitSound.play();
-                    this.cameras.main.shake(200, 0.01);
-                }
-            }
-
-            updateHealthBar() {
-                this.healthBar.clear(true, true);
-                for (let i = 0; i < this.gameState.hearts; i++) {
-                    this.healthBar.create(this.cameras.main.width - 40 - i * 45, 40, 'heart');
-                }
-            }
-
-            updatePowerUpIndicators() {
-                this.powerUpIndicators.clear(true, true);
-                this.gameState.powerUps.forEach((powerUp, index) => {
-                    const indicator = this.add.image(this.cameras.main.width - 40, 100 + index * 50, powerUp.type);
-                    const timeLeft = Math.max(0, powerUp.duration - (this.time.now - powerUp.startTime));
-                    const timerBar = this.add.rectangle(indicator.x, indicator.y + 25, 40 * (timeLeft / powerUp.duration), 5, 0xffffff);
-                    this.powerUpIndicators.add(indicator);
-                    this.powerUpIndicators.add(timerBar);
-                });
-            }
-
-            respawnPowerUp(powerUp) {
-                powerUp.x = this.cameras.main.width + Phaser.Math.Between(100, 1000);
-                powerUp.y = Phaser.Math.Between(100, this.cameras.main.height - 200);
-            }
-
-            shootProjectile() {
-                if (Math.random() < 0.5) {
-                    const projectile = this.physics.add.image(this.enemy.x + this.enemy.width / 2, this.enemy.y, 'projectile');
-                    projectile.setVelocityX(400);
-                    this.physics.add.overlap(this.chicken, projectile, this.damageChicken, null, this);
-                    if (this.gameState.soundOn) this.projectileSound.play();
-                }
-            }
-
-            gameOver() {
-                this.gameState.gameOver = true;
-                this.scene.pause();
-                // Show game over menu
-            }
+            break;
+        case 'shield':
+            gameState.shieldActive = true;
+            sprites.chicken.setTint(0x00ffff);
+            break;
+    }
+    updatePowerUpIndicators();
+}
+function hitChicken() {
+    if (gameState.shieldActive) {
+        gameState.shieldActive = false;
+        sprites.chicken.clearTint();
+    } else {
+        gameState.hearts--;
+        updateHealthBar();
+        if (gameState.hearts <= 0) gameOver();
+        else {
+            if (gameState.soundOn) sounds.hit_sound.play();
+            this.cameras.main.shake(200, 0.01);
         }
-
-        const config = {
-            type: Phaser.AUTO,
-            width: 800,
-            height: 600,
-            parent: 'game-container',
-            physics: {
-                default: 'arcade',
-                arcade: {
-                    gravity: { y: 300 },
-                    debug: false
-                }
-            },
-            scene: ChickenChaseGame
-        };
-
-        new Phaser.Game(config);
+    }
+}
+function updateHealthBar() {
+    const healthBar = document.getElementById('healthBar');
+    healthBar.innerHTML = '';
+    const heartType = `heart0${Math.min(5, Math.floor(gameState.distance / 500) + 1)}`;
+    for (let i = 0; i < gameState.hearts; i++) {
+        const heart = document.createElement('div');
+        heart.className = 'heart';
+        heart.style.backgroundImage = `url('assets/${heartType}.png')`;
+        healthBar.appendChild(heart);
+    }
+}
+function updatePowerUpIndicators() {
+    const indicators = document.getElementById('powerUpIndicators');
+    indicators.innerHTML = '';
+    if (gameState.chicken.poweredUp) {
+        const indicator = document.createElement('div');
+        indicator.className = 'power-up';
+        indicator.style.backgroundImage = "url('assets/magic-potion.png')";
+        const counter = document.createElement('div');
+        counter.className = 'power-up-counter';
+        counter.textContent = gameState.chicken.powerUpCount;
+        indicator.appendChild(counter);
+        indicators.appendChild(indicator);
+    }
+    if (gameState.shieldActive) {
+        const indicator = document.createElement('div');
+        indicator.className = 'power-up';
+        indicator.style.backgroundImage = "url('assets/shield.png')";
+        indicators.appendChild(indicator);
+    }
+}
+function gameOver() {
+    gameState.gameOver = true;
+    document.getElementById('finalScore').textContent = `Distance: ${Math.floor(gameState.distance)}m`;
+    document.getElementById('gameOverMenu').style.display = 'block';
+}
+function restartGame() {
+    gameState = {
+        distance: 0, paused: false, musicOn: gameState.musicOn, soundOn: gameState.soundOn,
+        chicken: { poweredUp: false, powerUpCount: 0 },
+        hearts: 5, powerUps: [], shieldActive: false, timeSinceLastDamage: 0,
+        gameOver: false
+    };
+    sprites.chicken.setTexture('chicken').setScale(0.5).setPosition(100, config.height - 200);
+    groups.powerUps.clear(true, true);
+    groups.projectiles.clear(true, true);
+    updateHealthBar();
+    updatePowerUpIndicators();
+    document.getElementById('gameOverMenu').style.display = 'none';
+    if (gameState.musicOn) sounds.background_music.play();
+}
+document.getElementById('pauseButton').addEventListener('click', () => {
+    gameState.paused = !gameState.paused;
+    if (gameState.paused) sounds.background_music.pause();
+    else if (gameState.musicOn) sounds.background_music.resume();
+});
+document.getElementById('musicButton').addEventListener('click', () => {
+    gameState.musicOn = !gameState.musicOn;
+    if (gameState.musicOn) sounds.background_music.play();
+    else sounds.background_music.pause();
+});
+document.getElementById('soundButton').addEventListener('click', () => gameState.soundOn = !gameState.soundOn);
+document.getElementById('playAgainButton').addEventListener('click', restartGame);
+document.getElementById('watchAdButton').addEventListener('click', () => {
+    alert("Watching ad... (In a real game, this would show an actual ad)");
+    setTimeout(() => {
+        gameState.hearts = Math.min(gameState.hearts + 1, 5);
+        updateHealthBar();
+        document.getElementById('watchAdButton').addEventListener('click', () => {
+            alert("Watching ad... (In a real game, this would show an actual ad)");
+            setTimeout(() => {
+                gameState.hearts = Math.min(gameState.hearts + 1, 5);
+                updateHealthBar();
+                document.getElementById('gameOverMenu').style.display = 'none';
+                gameState.gameOver = false;
+                if (gameState.musicOn) sounds.background_music.play();
+            }, 2000);
+        });
+        window.addEventListener('resize', () => {
+            game.scale.resize(window.innerWidth, window.innerHeight);
+            sprites.background.setSize(window.innerWidth, window.innerHeight);
+            sprites.ground.setPosition(window.innerWidth / 2, window.innerHeight - 50);
+        });
     </script>
 </body>
 </html>
