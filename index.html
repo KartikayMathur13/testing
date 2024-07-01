@@ -269,12 +269,14 @@ document.getElementById('watchAdButton').addEventListener('click', () => {
                 gameState.gameOver = false;
                 if (gameState.musicOn) sounds.background_music.play();
             }, 2000);
-        });
-        window.addEventListener('resize', () => {
-            game.scale.resize(window.innerWidth, window.innerHeight);
-            sprites.background.setSize(window.innerWidth, window.innerHeight);
-            sprites.ground.setPosition(window.innerWidth / 2, window.innerHeight - 50);
-        });
+    });
+});
+
+window.addEventListener('resize', () => {
+    game.scale.resize(window.innerWidth, window.innerHeight);
+    sprites.background.setSize(window.innerWidth, window.innerHeight);
+    sprites.ground.setPosition(window.innerWidth / 2, window.innerHeight - 50);
+});
     </script>
 </body>
 </html>
